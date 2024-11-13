@@ -1,30 +1,18 @@
 #!/bin/bash
 
-# Simple recipe to generate an appimage for this app
-#
+# Simple recipe to generate an AppImage for this app
 # Options:
-#   * -u will upload your AppImage file after success to github under
-#      "continuous builds"
+#   * -u will upload your AppImage file after success to GitHub under "continuous builds"
 #
 # Requirements:
-#   * VERSION as an ENV var, if not detected will use actual github
-#     version + commit info
-#   * This must be run after a successfully build and installation into a
-#     prefix passed as the PREFIX variable
-#   * Must be run on a Linux version as old as the far distro you need to
-#     support, tested successfully on Ubuntu 14.04 Trusty Tar
-#   * If you plan to use the "-u" option you need to configure some things
-#     for it to work, check this https://github.com/probonopd/uploadtool#usage
+#   * VERSION as an ENV var, if not detected will use actual GitHub version + commit info
+#   * This must be run after a successful build and installation into a prefix passed as the PREFIX variable
+#   * Must be run on a Linux version as old as the far distro you need to support, tested on Ubuntu 14.04 Trusty Tar
+#   * If you plan to use the "-u" option, configure settings according to https://github.com/probonopd/uploadtool#usage
 #
-# On any troubles invoke stdevPavelmc in github
-
-# PREFIX variable must be set before calling this script. It points to the
-# prefix in which gqrx is installed and from which dependency libraries will be
-# gathered.
-#PREFIX="micromamba/envs/gqrx"
+# PREFIX variable must be set before calling this script. It points to the prefix in which gqrx is installed
+# PREFIX="micromamba/envs/gqrx"
 APP="$PREFIX/bin/gqrx"
-
-# No need to tweak below unless you move files on the actual project
 DESKTOP="dk.gqrx.gqrx.desktop"
 ICON="resources/icons/gqrx.svg"
 
@@ -42,12 +30,12 @@ echo ""
 
 # basic tests
 if [ ! -f "$APP" ] ; then
-    echo "Error: the app file is no in the path we need it, set the PREFIX var before running this script"
+    echo "Error: the app file is not in the path we need it, set the PREFIX var before running this script"
     exit 1
 fi
 
 if [ ! -f "$DESKTOP" ] ; then
-    echo "Error: can't find the desktop file, please update the DESKTOP var on the script"
+    echo "Error: can't find the desktop file, please update the DESKTOP var in the script"
     exit 1
 fi
 
@@ -66,15 +54,14 @@ wget -c -nv "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/downl
 wget -c -nv "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
 chmod a+x *.AppImage
 
-# build library arguments so soapy module dependencies are included
+# build library arguments so Soapy module dependencies are included
 soapy_module_libs=("$PREFIX"/lib/SoapySDR/modules*/*)
 linuxdeploy_lib_args=()
 for lib in ${soapy_module_libs[@]}; do
     linuxdeploy_lib_args+=( "-l" "$lib" )
 done
 
-# force otherwise excluded libraries that we really need because of library
-# dependence on newer versions
+# force libraries that we need
 linuxdeploy_lib_args+=(
     "-l" "$PREFIX"/lib/libasound.so.2
     "-l" "$PREFIX"/lib/libexpat.so.1
@@ -99,19 +86,19 @@ echo 'export UHD_PKG_PATH="$APPDIR/usr"' >./AppDir/apprun-hooks/uhd-hook.sh
 echo 'export FONTCONFIG_FILE="$APPDIR/etc/fonts/fonts.conf"
 export FONTCONFIG_PATH="$APPDIR/etc/fonts"' >./AppDir/apprun-hooks/fontconfig-hook.sh
 
-# since libs come from prefix, little use in querying copyright files with dpkg-query
-export DISABLE_COPYRIGHT_FILES_DEPLOYMENT=1
+# set UHD_IMAGES_DIR to locate UHD firmware images in the AppImage
+echo 'export UHD_IMAGES_DIR="$APPDIR/usr/share/uhd/images"' >> ./AppDir/apprun-hooks/uhd-hook.sh
 
-# need to set QMAKE variable for linuxdeploy-plugin-qt so it uses PREFIX's Qt
+# set QMAKE variable for linuxdeploy-plugin-qt to use PREFIX's Qt
 export QMAKE="$PREFIX/bin/qmake6"
 
 ./linuxdeploy-x86_64.AppImage -e "$APP" -d "$DESKTOP" -i "$ICON" "${linuxdeploy_lib_args[@]}" -p qt --appdir=./AppDir
 RESULT=$?
 
-# copy Soapy modules into their expected path in the AppDir
+# copy Soapy modules into expected path in the AppDir
 cp -R "$PREFIX"/lib/SoapySDR ./AppDir/usr/lib/SoapySDR
 
-# copy fontconfig configuration files that the FONTCONFIG_FILE env var points to
+# copy fontconfig configuration files
 mkdir -p ./AppDir/etc/
 cp -RL "$PREFIX"/etc/fonts ./AppDir/etc/fonts
 # remove any config file lines that refer to the old prefix if it's not /usr
@@ -119,26 +106,30 @@ if [ "${PREFIX:0:4}" != "/usr" ] ; then
     sed -i "\|$PREFIX|d" ./AppDir/etc/fonts/fonts.conf
 fi
 
+# download UHD images
+mkdir -p "$PREFIX/share/uhd/images"
+"$PREFIX"/lib/uhd/utils/uhd_images_downloader.py
+
+# copy UHD images into AppImage
+mkdir -p ./AppDir/usr/share/uhd/images
+cp -R "$PREFIX"/share/uhd/images/* ./AppDir/usr/share/uhd/images/
+
 # finally make the AppImage
 ./appimagetool-x86_64.AppImage AppDir/
 
 # check build success
 if [ $RESULT -ne 0 ] ; then
-    # warning something gone wrong
     echo ""
-    echo "ERROR: Aborting as something gone wrong, please check the logs"
+    echo "ERROR: Aborting as something went wrong, please check the logs"
     exit 1
 else
-    # success
     echo ""
     echo "Success build, check your file:"
     ls -lh Gqrx-*.AppImage
 fi
 
+# upload if requested
 if [ "$1" == "-u" ] ; then
-    # must upload to continuous releases
-    # see https://github.com/probonopd/uploadtool#usage for configs to be done
-    # for this to work as needed
     wget -c https://github.com/probonopd/uploadtool/raw/master/upload.sh
     bash upload.sh Gqrx-*.AppImage
 fi
