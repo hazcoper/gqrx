@@ -90,6 +90,7 @@ linuxdeploy_lib_args+=(
     "-l" "$PREFIX"/lib/libuuid.so.1
     "-l" "$PREFIX"/lib/libxcb.so.1
     "-l" "$PREFIX"/lib/libz.so.1
+    "-l" "$PREFIX/lib/libuhd.so"
 )
 
 mkdir -p ./AppDir/apprun-hooks
