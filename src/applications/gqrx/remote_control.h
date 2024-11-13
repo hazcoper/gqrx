@@ -125,10 +125,12 @@ signals:
 private slots:
     void acceptConnection();
     void startRead();
+    void clientDisconnected();
 
 private:
-    QTcpServer  rc_server;         /*!< The active server object. */
-    QTcpSocket* rc_socket;         /*!< The active socket object. */
+    QTcpServer  rc_server;          /*!< The active server object. */
+    QTcpSocket* rc_socket;          /*!< The active socket object. */
+    QList<QTcpSocket *> rc_sockets; /*!< List of active socket objects. */
 
     QStringList rc_allowed_hosts;  /*!< Hosts where we accept connection from. */
     int         rc_port;           /*!< The port we are listening on. */

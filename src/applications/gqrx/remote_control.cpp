@@ -58,7 +58,8 @@ RemoteControl::RemoteControl(QObject *parent) :
     rc_port = DEFAULT_RC_PORT;
     rc_allowed_hosts.append(DEFAULT_RC_ALLOWED_HOSTS);
 
-    rc_socket = 0;
+    // rc_socket = 0;
+    rc_sockets.clear();   // rc_socket is now rc_sockets which is a list of sockets
 
     connect(&rc_server, SIGNAL(newConnection()), this, SLOT(acceptConnection()));
 }
@@ -78,11 +79,22 @@ void RemoteControl::start_server()
 /*! \brief Stop the server. */
 void RemoteControl::stop_server()
 {
-    if (rc_socket != 0) {
-        rc_socket->close();
-        rc_socket->deleteLater();
-        rc_socket = 0;
+    // if (rc_socket != 0) {
+    //     rc_socket->close();
+    //     rc_socket->deleteLater();
+    //     rc_socket = 0;
+    // }
+
+    // Close each socket connection and delete it
+    for (QTcpSocket *socket : rc_sockets)
+    {
+        if (socket->isOpen())
+            socket->close();
+        socket->deleteLater();
     }
+
+    // Clear the list of sockets
+    rc_sockets.clear();
 
     if (rc_server.isListening())
         rc_server.close();
@@ -162,32 +174,72 @@ void RemoteControl::setHosts(QStringList hosts)
  *
  * This slot is called when a client opens a new connection.
  */
+// void RemoteControl::acceptConnection()
+// {
+//     std::cout << "*** Remote connection accepted" << std::endl;
+//     if (rc_socket)
+//     {
+//         std::cout << " Previous socket present, lets delete it" << std::endl;
+//         rc_socket->close();
+//         rc_socket->deleteLater();
+//     }
+//     rc_socket = rc_server.nextPendingConnection();
+
+//     // check if host is allowed
+//     auto address = rc_socket->peerAddress();
+
+//     for (auto allowed_host : rc_allowed_hosts)
+//     {
+//         if (address.isEqual(QHostAddress(allowed_host)))
+//         {
+//             connect(rc_socket, SIGNAL(readyRead()), this, SLOT(startRead()));
+//             return;
+//         }
+//     }
+
+//     std::cout << "*** Remote connection attempt from " << address.toString().toStdString()
+//               << " (not in allowed list)" << std::endl;
+//     rc_socket->close();
+//     rc_socket->deleteLater();
+//     rc_socket = 0;
+// }
 void RemoteControl::acceptConnection()
 {
-    if (rc_socket)
-    {
-        rc_socket->close();
-        rc_socket->deleteLater();
-    }
-    rc_socket = rc_server.nextPendingConnection();
+    QTcpSocket *newSocket = rc_server.nextPendingConnection();
+    if (!newSocket)
+        return;
 
-    // check if host is allowed
-    auto address = rc_socket->peerAddress();
-
-    for (auto allowed_host : rc_allowed_hosts)
+    // Check if the host is allowed
+    auto address = newSocket->peerAddress();
+    for (const auto &allowed_host : rc_allowed_hosts)
     {
         if (address.isEqual(QHostAddress(allowed_host)))
         {
-            connect(rc_socket, SIGNAL(readyRead()), this, SLOT(startRead()));
+            // Add socket to list and connect signals
+            rc_sockets.append(newSocket);
+            connect(newSocket, SIGNAL(readyRead()), this, SLOT(startRead()));
+            connect(newSocket, SIGNAL(disconnected()), this, SLOT(clientDisconnected()));
+            std::cout << "*** Remote connection accepted" << std::endl;
             return;
         }
     }
 
     std::cout << "*** Remote connection attempt from " << address.toString().toStdString()
               << " (not in allowed list)" << std::endl;
-    rc_socket->close();
-    rc_socket->deleteLater();
-    rc_socket = 0;
+    newSocket->close();
+    newSocket->deleteLater();
+}
+
+
+void RemoteControl::clientDisconnected()
+{
+    QTcpSocket *socket = qobject_cast<QTcpSocket *>(sender());
+    if (socket)
+    {
+        rc_sockets.removeAll(socket);
+        socket->deleteLater();
+        std::cout << "*** Remote connection closed" << std::endl;
+    }
 }
 
 /*! \brief Start reading from the socket.
@@ -197,81 +249,90 @@ void RemoteControl::acceptConnection()
  */
 void RemoteControl::startRead()
 {
-    while (rc_socket->canReadLine()) {
-        char    buffer[1024] = {0};
-        int     bytes_read;
-        QString answer = "";
+    // [check] - change this from auto to the correct type 
+    for (auto *socket : rc_sockets){
 
-        bytes_read = rc_socket->readLine(buffer, 1024);
-        if (bytes_read < 2)  // command + '\n'
-            continue;
+        while (socket->canReadLine()) {
+            char    buffer[1024] = {0};
+            int     bytes_read;
+            QString answer = "";
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
-        QStringList cmdlist = QString(buffer).trimmed().split(" ", QString::SkipEmptyParts);
-#else
-        QStringList cmdlist = QString(buffer).trimmed().split(" ", Qt::SkipEmptyParts);
-#endif
+            bytes_read = socket->readLine(buffer, 1024);
+            if (bytes_read < 2)  // command + '\n'
+                continue;
 
-        if (cmdlist.size() == 0)
-            continue;
+    #if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
+            QStringList cmdlist = QString(buffer).trimmed().split(" ", QString::SkipEmptyParts);
+    #else
+            QStringList cmdlist = QString(buffer).trimmed().split(" ", Qt::SkipEmptyParts);
+    #endif
 
-        QString cmd = cmdlist[0];
-        if (cmd == "f")
-            answer = cmd_get_freq();
-        else if (cmd == "F")
-            answer = cmd_set_freq(cmdlist);
-        else if (cmd == "m")
-            answer = cmd_get_mode();
-        else if (cmd == "M")
-            answer = cmd_set_mode(cmdlist);
-        else if (cmd == "l")
-            answer = cmd_get_level(cmdlist);
-        else if (cmd == "L")
-            answer = cmd_set_level(cmdlist);
-        else if (cmd == "u")
-            answer = cmd_get_func(cmdlist);
-        else if (cmd == "U")
-            answer = cmd_set_func(cmdlist);
-        else if (cmd == "v")
-            answer = cmd_get_vfo();
-        else if (cmd == "V")
-            answer = cmd_set_vfo(cmdlist);
-        else if (cmd == "s")
-            answer = cmd_get_split_vfo();
-        else if (cmd == "S")
-            answer = cmd_set_split_vfo();
-        else if (cmd == "p")
-            answer = cmd_get_param(cmdlist);
-        else if (cmd == "_")
-            answer = cmd_get_info();
-        else if (cmd == "AOS")
-            answer = cmd_AOS();
-        else if (cmd == "LOS")
-            answer = cmd_LOS();
-        else if (cmd == "LNB_LO")
-            answer = cmd_lnb_lo(cmdlist);
-        else if (cmd == "\\chk_vfo")
-            answer = QString("0\n");
-        else if (cmd == "\\dump_state")
-            answer = cmd_dump_state();
-        else if (cmd == "\\get_powerstat")
-            answer = QString("1\n");
-        else if (cmd == "q" || cmd == "Q")
-        {
-            // FIXME: for now we assume 'close' command
-            rc_socket->close();
-            rc_socket->deleteLater();
-            rc_socket = 0;
-            return;
+            if (cmdlist.size() == 0)
+                continue;
+
+            QString cmd = cmdlist[0];
+            if (cmd == "f")
+                answer = cmd_get_freq();
+            else if (cmd == "F")
+                answer = cmd_set_freq(cmdlist);
+            else if (cmd == "m")
+                answer = cmd_get_mode();
+            else if (cmd == "M")
+                answer = cmd_set_mode(cmdlist);
+            else if (cmd == "l")
+                answer = cmd_get_level(cmdlist);
+            else if (cmd == "L")
+                answer = cmd_set_level(cmdlist);
+            else if (cmd == "u")
+                answer = cmd_get_func(cmdlist);
+            else if (cmd == "U")
+                answer = cmd_set_func(cmdlist);
+            else if (cmd == "v")
+                answer = cmd_get_vfo();
+            else if (cmd == "V")
+                answer = cmd_set_vfo(cmdlist);
+            else if (cmd == "s")
+                answer = cmd_get_split_vfo();
+            else if (cmd == "S")
+                answer = cmd_set_split_vfo();
+            else if (cmd == "p")
+                answer = cmd_get_param(cmdlist);
+            else if (cmd == "_")
+                answer = cmd_get_info();
+            else if (cmd == "AOS")
+                answer = cmd_AOS();
+            else if (cmd == "LOS")
+                answer = cmd_LOS();
+            else if (cmd == "LNB_LO")
+                answer = cmd_lnb_lo(cmdlist);
+            else if (cmd == "\\chk_vfo")
+                answer = QString("0\n");
+            else if (cmd == "\\dump_state")
+                answer = cmd_dump_state();
+            else if (cmd == "\\get_powerstat")
+                answer = QString("1\n");
+            else if (cmd == "q" || cmd == "Q")
+            {
+                // FIXME: for now we assume 'close' command
+                socket->close();
+                socket->deleteLater();
+
+                // delete from the list
+                rc_sockets.removeAll(socket);
+
+                // [check] - need to test this and make sure that it is doing what is supposed
+
+                return;
+            }
+            else
+            {
+                // print unknown command and respond with an error
+                qWarning() << "Unknown remote command:" << cmdlist;
+                answer = QString("RPRT 1\n");
+            }
+
+            socket->write(answer.toLatin1());
         }
-        else
-        {
-            // print unknown command and respond with an error
-            qWarning() << "Unknown remote command:" << cmdlist;
-            answer = QString("RPRT 1\n");
-        }
-
-        rc_socket->write(answer.toLatin1());
     }
 }
 
