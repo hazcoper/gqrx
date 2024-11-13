@@ -36,7 +36,7 @@ jobs:
             soapysdr-module-lms7
             soapysdr-module-plutosdr
             soapysdr-module-remote
-            soapysdr0.8-module-uhd
+            soapysdr-module-uhd
             volk
       - name: Checkout code
         uses: actions/checkout@v4
